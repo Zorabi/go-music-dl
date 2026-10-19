@@ -8,12 +8,28 @@ void music_dl_install_edit_menu(void) {
     if (!bar) {
         bar = [[NSMenu alloc] initWithTitle:@""];
         [NSApp setMainMenu:bar];
-        NSMenuItem *appItem = [[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];
-        NSMenu *appMenu = [[NSMenu alloc] initWithTitle:@"music-dl"];
-        [appMenu addItemWithTitle:@"退出 music-dl" action:@selector(terminate:) keyEquivalent:@"q"];
-        [appItem setSubmenu:appMenu];
-        [bar addItem:appItem];
     }
+    // A pre-existing menu bar does not imply that it contains an application
+    // menu or a Quit item. Always ensure Command-Q has an explicit target.
+    NSMenu *appMenu = bar.numberOfItems ? [[bar itemAtIndex:0] submenu] : nil;
+    if (!appMenu || [appMenu.title isEqualToString:@"编辑"]) {
+        NSMenuItem *appItem = [[NSMenuItem alloc] initWithTitle:@"music-dl" action:nil keyEquivalent:@""];
+        appMenu = [[NSMenu alloc] initWithTitle:@"music-dl"];
+        [appItem setSubmenu:appMenu];
+        [bar insertItem:appItem atIndex:0];
+    }
+    NSMenuItem *quit = nil;
+    for (NSMenuItem *item in appMenu.itemArray) {
+        if (item.action == @selector(terminate:)) {
+            quit = item;
+            break;
+        }
+    }
+    if (!quit) quit = [appMenu addItemWithTitle:@"退出 music-dl" action:@selector(terminate:) keyEquivalent:@"q"];
+    [quit setTarget:NSApp];
+    [quit setKeyEquivalent:@"q"];
+    [quit setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
+    if ([bar itemWithTitle:@"编辑"]) return;
     NSMenu *edit = [[NSMenu alloc] initWithTitle:@"编辑"];
     [edit addItemWithTitle:@"撤销" action:@selector(undo:) keyEquivalent:@"z"];
     NSMenuItem *redo = [edit addItemWithTitle:@"重做" action:@selector(redo:) keyEquivalent:@"z"];
