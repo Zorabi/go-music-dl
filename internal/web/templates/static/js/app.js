@@ -6791,6 +6791,7 @@ function syncPlayerTrackControls() {
   const hasTracks = Boolean(ap?.list?.audios?.length);
   player?.classList.toggle("is-empty", !hasTracks);
   if (!player) return;
+  syncPlaybackQueueControls(player);
 
   const controls = [
     [".aplayer-icon-back", "上一首"],
@@ -9357,4 +9358,84 @@ if (ap?.on) {
   window.addEventListener("pagehide", savePlaybackPosition);
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", restorePlaybackSession, {once:true});
   else void restorePlaybackSession();
+}
+
+function syncPlaybackQueueControls(player) {
+  const list = player.querySelector(".aplayer-list");
+  const ol = list?.querySelector("ol");
+  if (!list || !ol) return;
+  let toolbar = list.querySelector(".playback-queue-toolbar");
+  if (!toolbar) {
+    toolbar = document.createElement("div");
+    toolbar.className = "playback-queue-toolbar";
+    toolbar.innerHTML = '<span class="playback-queue-count"></span><button type="button" class="btn-pill btn-pill-danger playback-queue-clear"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> 清空清单</button>';
+    toolbar.addEventListener("click", event => event.stopPropagation());
+    toolbar.querySelector("button").addEventListener("click", () => { void clearPlaybackQueue(); });
+    list.prepend(toolbar);
+    // APlayer delegates every list click as a song switch. Intercept removals first.
+    list.addEventListener("click", event => {
+      const button = event.target.closest(".playback-remove-track");
+      if (!button) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const row = button.closest("li");
+      const index = Array.from(ol.children).indexOf(row);
+      if (index >= 0) void removePlaybackQueueTrack(index);
+    }, true);
+  }
+  const count = ap?.list?.audios?.length || 0;
+  const label = toolbar.querySelector(".playback-queue-count");
+  if (label.textContent !== `播放清单 · ${count} 首`) label.textContent = `播放清单 · ${count} 首`;
+  toolbar.querySelector("button").disabled = !count;
+  if (list.dataset.queueControlsCount === String(count) && (!count || ol.lastElementChild?.querySelector(".playback-remove-track"))) return;
+  list.dataset.queueControlsCount = String(count);
+  for (const row of ol.children) {
+    if (row.querySelector(".playback-remove-track")) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "playback-remove-track";
+    const name = row.querySelector(".aplayer-list-title")?.textContent || "此歌曲";
+    button.title = "从播放清单移除";
+    button.setAttribute("aria-label", `从播放清单移除：${name}`);
+    button.innerHTML = '<i class="fa-solid fa-xmark" aria-hidden="true"></i>';
+    row.appendChild(button);
+  }
+}
+
+function resetEmptyPlaybackQueue() {
+  if (ap?.list?.audios?.length) return;
+  currentPlayingId = null;
+  window.currentPlayingId = null;
+  highlightCard(null);
+  syncAllPlayButtons();
+  KaraokeLyrics.hide();
+  clearMediaSession();
+  document.title = defaultDocumentTitle || "music-dl";
+}
+
+async function savePlaybackQueueNow() {
+  savePlaybackPosition();
+  const songs = (ap?.list?.audios || []).map(playbackSessionSong).filter(song => song.id && song.source);
+  await writePlaybackSession({version:1, songs});
+}
+
+async function clearPlaybackQueue() {
+  if (!ap?.list?.audios?.length) return;
+  if (!(await confirmAppAction({title:"清空播放清单", message:"确定停止播放并清空整个播放清单及已保存的进度？重启后不会恢复此清单。歌曲文件、播放历史和下载队列会保留。", confirmLabel:"清空清单", destructive:true}))) return;
+  ap.list.clear();
+  resetEmptyPlaybackQueue();
+  syncPlayerTrackControls();
+  try {
+    await savePlaybackQueueNow();
+    showToast("播放清单已清空", "重启后不会再恢复此清单。", "success", 3000);
+  } catch (error) { reportPlaybackSessionError(error); }
+}
+
+async function removePlaybackQueueTrack(index) {
+  if (!Number.isInteger(index) || index < 0 || index >= (ap?.list?.audios?.length || 0)) return;
+  ap.list.remove(index);
+  resetEmptyPlaybackQueue();
+  syncPlayerTrackControls();
+  try { await savePlaybackQueueNow(); }
+  catch (error) { reportPlaybackSessionError(error); }
 }

@@ -12,12 +12,14 @@ function setup(storage={record:null,local:new Map()}) {
   list:{audios:[],index:0,
    add(songs){handlers.listadd?.forEach(fn=>fn());this.audios.push(...songs);},
    switch(index){this.index=index;handlers.listswitch?.forEach(fn=>fn({index}));},
-   clear(){handlers.listclear?.forEach(fn=>fn());this.audios=[];}
+   remove(index){handlers.listremove?.forEach(fn=>fn());this.audios.splice(index,1);this.index=Math.min(this.index,Math.max(0,this.audios.length-1));if(!this.audios.length){this.clear();}},
+   clear(){handlers.listclear?.forEach(fn=>fn());this.audios=[];ap.pause();}
   }
  };
  const ctx={ap,console,queueMicrotask,Date,showToast:(...args)=>calls.push(['toast',...args]),
   serializeSongExtra:value=>JSON.stringify(value||{}),
   playbackEntryFromSong:s=>({custom_id:s.id,source:s.source,name:s.name,url:'fresh-stream:'+s.id}),
+  confirmAppAction:async()=>true,highlightCard(){},syncAllPlayButtons(){},KaraokeLyrics:{hide(){}},clearMediaSession(){},defaultDocumentTitle:'MusicDL',
   syncPlayerTrackControls(){},document:{readyState:'loading',addEventListener(){}},window:{addEventListener(){}},
   localStorage:{getItem:key=>storage.local.get(key)||null,setItem:(key,value)=>storage.local.set(key,value),removeItem:key=>storage.local.delete(key)},
  };
@@ -55,4 +57,25 @@ test('delayed metadata cannot seek a different song after the user switches',asy
  const s=setup({record:{version:1,songs:[{id:'1',source:'local'},{id:'2',source:'local'}]},local:new Map([['musicdl:playback-position',JSON.stringify({id:'1',source:'local',position:40})]])});
  await s.ctx.restorePlaybackSession();s.ap.list.switch(1);s.audioHandlers.loadedmetadata();
  assert.ok(!s.calls.some(c=>Array.isArray(c)&&c[0]==='seek'));
+});
+
+
+test('canceling clear leaves both current and persisted playlists untouched',async()=>{
+ const s=setup();s.ap.list.add([song(1)]);await Promise.resolve();
+ s.ctx.confirmAppAction=async()=>false;await s.ctx.clearPlaybackQueue();
+ assert.equal(s.ap.list.audios.length,1);assert.equal(s.storage.record.songs.length,1);
+});
+test('confirmed clear stops audio and removes persisted songs and resume position',async()=>{
+ const s=setup();s.ap.list.add([song(1),song(2)]);s.ap.audio.currentTime=80;await Promise.resolve();
+ await s.ctx.clearPlaybackQueue();await Promise.resolve();
+ assert.equal(s.ap.list.audios.length,0);assert.equal(s.storage.record.songs.length,0);
+ assert.equal(s.storage.local.get('musicdl:playback-position'),undefined);assert.ok(s.calls.includes('pause'));
+ const next=setup(s.storage);await next.ctx.restorePlaybackSession();assert.equal(next.ap.list.audios.length,0);
+});
+test('removing a single song persists its removal and removing the last song saves an empty list',async()=>{
+ const s=setup();s.ap.list.add([song(1),song(2)]);await Promise.resolve();
+ await s.ctx.removePlaybackQueueTrack(0);await Promise.resolve();
+ assert.deepEqual(s.storage.record.songs.map(x=>x.id),['2']);
+ const next=setup(s.storage);await next.ctx.restorePlaybackSession();assert.equal(next.ap.list.audios[0].custom_id,'2');
+ await s.ctx.removePlaybackQueueTrack(0);await Promise.resolve();assert.equal(s.storage.record.songs.length,0);
 });
